@@ -15,7 +15,9 @@ make -j 8 'CFLAGS=-DLUAJIT_NUMMODE=2 -DLUAJIT_ENABLE_LUA52COMPAT'
 make install DESTDIR=$(pwd)
 cd ../dpdk
 make -j 8 install T=x86_64-native-linuxapp-gcc
-../../bind-interfaces.sh
+# Let's not automatically bind DPDK to interfaces during build process.  Let's manually pick and choose,
+# so comment 'bind-interfaces.sh' out 
+#../../bind-interfaces.sh
 cd ../../build
 cmake ..
 make
