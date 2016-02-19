@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>MoonGen Set Up Procedure</title>
+    </head>
+    <body>
+    <h1>MoonGen</h1>
+    Note I am a user of the MoonGen application and not the author.  The original code and documentation can be found here: <br><br>
+    <a href="https://github.com/emmericp/MoonGen">MoonGen GitHub</a><br><br>
+    The follow notes regarding MoonGen installation and execution are meant to be used in concert with the original documenation 
+    as detailed within the README file of the above github.  I have modified the MoonGen application slightly to suite my needs - although 
+    whole overall process does not deviate too much from the original. 
+    <h2>MoonGen Installation Notes</h2>
+    <ol>
+        <b><li>Review README.md and install dependencies</li></b>
+        <br>
+        Review the <a href="https://github.com/bmichalo/MoonGen/blob/opnfv/README.md">README</a> file and 
+        install via your Linux distribution's package manager (e.g., "yum install make") the needed dependencies: <br>
+        <ul>
+            <li>gcc</li> 
+            <li>make</li>
+            <li>cmake</li>
+            <li>kernel headers</li>
+        </ul>
+        <br>
+
+        <b><li>Download the MoonGen source code (note my github cloned from the original)</li></b>
+        <pre>
+        [root@perf36 MoonGen]# git clone https://github.com/bmichalo/MoonGen
+        </pre>
+
+        <b><li>List the remote branches</li></b>
+        <pre>
+        [root@perf36 MoonGen]# cd MoonGen 
+        [root@perf36 MoonGen]# git branch -a
+        * master
+          remotes/origin/HEAD->origin/master
+          remotes/origin/X520
+          remotes/origin/dpdk2.0
+          remotes/origin/master
+          remotes/origin/opnfv
+          remotes/origin/rfc1242
+        </pre>
+
+        <b><li>Checkout the opnfv branch</li></b>
+        <pre>
+        [root@perf36 MoonGen]# git checkout opnfv
+        Branch opnfv set up to track remote branch opnfv from origin.
+        Switched to a new branch 'opnfv'
+        </pre>
+
+        <b><li>Initialize submodules</li></b>
+        <pre>
+        [root@perf36 MoonGen]# git submodule update --init 
+        </pre>
+
+        <b><li>Verify the opnfv-vsperf.lua script</li></b>
+        <pre>
+        [root@perf36 MoonGen]# ls examples/opnfv-vsperf.lua
+        examples/opnfv-vsperf.lua
+        </pre>
+
+        <b><li>Note the DPDK version</li></b>
+        <br>
+        Make note of the DPDK version by observing the contents of:  MoonGen/deps/dpdk/pkg/dpdk-core.spec
+        <pre>
+        [root@perf36 MoonGen]# grep Version deps/dpdk/pkg/dpdk-core.spec 
+        Version: 1.7.1
+        </pre>
+            
+        <b><li>Build MoonGen and bind DPDK to interfaces</li></b>
+        <pre>
+        [root@perf36 MoonGen] ./build.sh 
+        </pre>
+
+        <b><li>Potential build error (may be immaterial)*</li></b>
+        <br>
+         A build error may be seen with regards to igb_main.c.  I had to make the following edit to 'MoonGen/deps/dpdk/lib/librte_eal/linuxapp/kni/Makefile'
+        <pre>
+        [root@perf36 MoonGen]# git diff
+        diff --git a/deps/dpdk/lib/librte_eal/linuxapp/kni/Makefile b/deps/dpdk/lib/librte_eal/linuxapp/kni/Makefile
+        index e0218e7..97abb03 100644
+        --- a/deps/dpdk/lib/librte_eal/linuxapp/kni/Makefile
+        +++ b/deps/dpdk/lib/librte_eal/linuxapp/kni/Makefile
+        @@ -77,7 +77,7 @@ SRCS-y += ethtool/igb/e1000_nvm.c
+         SRCS-y += ethtool/igb/e1000_phy.c
+         SRCS-y += ethtool/igb/igb_ethtool.c
+         SRCS-y += ethtool/igb/igb_hwmon.c
+        -SRCS-y += ethtool/igb/igb_main.c
+        +# SRCS-y += ethtool/igb/igb_main.c
+         SRCS-y += ethtool/igb/igb_debugfs.c
+         SRCS-y += ethtool/igb/igb_param.c
+         SRCS-y += ethtool/igb/igb_procfs.c
+        </pre>
+        
+        <b><li>Hugepage allocation</li></b>
+        <br>
+        Set up the huge allocation via setup-hugetlbfs.sh, or can do it via parameters at boot time thus will be persistant across system reboots, e.g.:<br>
+        <pre>
+        [root@perf36 MoonGen]# ./setup-hugetlbfs.sh 
+        </pre>
+        or
+        <pre>
+        [root@perf36 MoonGen]# cat /proc/cmdline
+        BOOT_IMAGE=/vmlinuz-3.10.0-325.el7.x86_64 root=/dev/mapper/perf36_rhel72-root ro crashkernel=auto rd.lvm.lv=perf36_rhel72/root rd.lvm.lv=perf36_rhel72/swap rhgb quiet LANG=en_US.UTF-8 intel_iommu=on default_hugepagesz=1G hugepagesz=1G hugepages=32 selinux=0 iommu=pt
+        </pre>
+        via using for example the grubby utility:<br>
+        <pre>
+        [root@perf36 MoonGen]# grubby --update-kernel=`grubby --default-kernel` --args="default_hugepagesz=1G hugepagesz=1G hugepages=32"
+        </pre>
+        Note that if the boot command line is modified, a reboot must occur in order to allocate memory with the new hugepage settings.
+        <br>
+        <br>
+
+
+        <b><li>Bind DPDK to interfaces of interest</li></b>
+        <br>
+        DPDK bypasses the native Linux networking stack and uses a userspace poll mode driver to transmit and receive packets from the wire.  This is known as 
+        a "pass through mode".  There are at least a few flavors of kernel drivers that will enable this packet pass through:
+        <br>
+        <br>
+        <dl>
+            <dt><b>uio_pci_generic</b></dt>
+            <dd>Generic User I/O kernel modules packaged with Linux kernel</dd>
+            <dt><b>igb_uio</b></dt>
+            <dd>User I/O kernel modules packaged with MoonGen (within the DPDK dependency).  igb_uio built within MoonGen dependencies and Intel specific</dd>
+            <dt><b>vfio-pci</b></dt>
+            <dd>A more secure User I/O kernel driver that utilizes IOMMU hardware.  If using an Intel processor with IOMMU 
+                supported hardware, the kernel bootloader parameter 'intel_iommu=on' must be added and can be again done using the 'grubby' utility  (grubby --update-kernel=`grubby --default-kernel` --args="intel_iommu=on") and then reboot</dd>
+        </dl>
+        <br>
+        It is recommended that if hardware support for IOMMU is there, use vfio-pci.  If not, use uio_pci_generic or igb_uio.  One way to determine if IOMMU support is 
+        present is to look into the kernel log:<br>
+        <pre>
+        [root@perf84 ~]# dmesg | grep -i IOMMU
+        [    0.000000 ] Intel-IOMMU: enabled
+        </pre>
+        Determine the PCI 'Doman:Bus:Device:Function' information for the interfaces which you want to use MoonGen (and thus bind DPDK).  This can be done 
+        via the 'ethtool' (yum install ethtool) utility via 'ethtool -i <interface_name>', e.g.:
+        <pre>
+        [root@perf36 MoonGen]# ethtool -i em1 | grep 'bus-info'
+        bus-info: 0000:01:00.0
+        [root@perf36 MoonGen]# ethtool -i em2 | grep 'bus-info'
+        bus-info: 0000:01:00.1
+        </pre>
+        where in this case network devices 'em1' and 'em2' are both 10G capable ports where its desired to use MoonGen to TX/RX traffic.
+        <br>
+        This can also be seen via the DPDK utility 'dpdk_nic_bind.py' again under MoonGen's DPDK dependency directory:
+        <br>
+        <pre>
+        [root@perf36 MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --status
+
+        Network devices using DPDK-compatible driver
+        ============================================
+        &ltnone&gt
+
+        Network devices using kernel driver
+        ===================================
+        0000:01:00.0 '82599ES 10-Gigabit SFI/SFP+ Network Connection' if=em1 drv=ixgbe unused= 
+        0000:01:00.1 '82599ES 10-Gigabit SFI/SFP+ Network Connection' if=em2 drv=ixgbe unused= 
+        0000:03:00.0 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p1 drv=i40e unused= 
+        0000:03:00.1 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p2 drv=i40e unused= 
+        0000:05:00.0 'I350 Gigabit Network Connection' if=em3 drv=igb unused= *Active*
+        0000:05:00.1 'I350 Gigabit Network Connection' if=em4 drv=igb unused= 
+
+        Other network devices
+        =====================
+        &ltnone&gt
+        </pre>
+
+        Use 'dpdk_nic_bind.py' to unbind network devices from current drivers.  In this case, its ixgbe.  Before doing the unbind, shutdown the interfaces.
+        <br>
+        <pre>
+
+        [root@perf36 MoonGen]# ifdown em1 
+        [root@perf36 MoonGen]# ifdown em2 
+        [root@perf36 MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --unbind 0000:01:00.0 0000:01:00.1
+
+        </pre>
+
+        Again using 'dpdk_nic_bind.py', bind DPDK to the interfaces to be used with MoonGen.  In this case, the two 10G network devices will be used:<br>
+
+        <pre>
+        [root@perf36 MoonGen]# modprobe vfio-pci
+        [root@perf36 MoonGen]# 
+        [root@perf36 MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --bind=vfio-pci 0000:01:00.0 0000:01:00.1
+        </pre>
+
+        And now we can see that the 10G network devices are bound to the appropriate DPDK supported driver:
+        <br>
+        <pre>
+        [root@perf36 MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --status
+        
+        Network devices using DPDK-compatible driver
+        ============================================
+        0000:01:00.0 '82599ES 10-Gigabit SFI/SFP+ Network Connection' drv=vfio-pci unused=
+        0000:01:00.1 '82599ES 10-Gigabit SFI/SFP+ Network Connection' drv=vfio-pci unused=
+        
+        Network devices using kernel driver
+        ===================================
+        0000:03:00.0 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p1 drv=i40e unused=vfio-pci 
+        0000:03:00.1 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p2 drv=i40e unused=vfio-pci 
+        0000:05:00.0 'I350 Gigabit Network Connection' if=em3 drv=igb unused=vfio-pci *Active*
+        0000:05:00.1 'I350 Gigabit Network Connection' if=em4 drv=igb unused=vfio-pci 
+        
+        Other network devices
+        =====================
+        &ltnone&gt
+        </pre>
+
+        <b><li>Running MoonGen - No arguments gives command line options</li></b>
+        <pre>
+        [root@perf36 MoonGen]# ./build/MoonGen ./examples/opnfv-vsperf.lua 
+        EAL: Detected lcore 0 as core 0 on socket 0
+        EAL: Detected lcore 1 as core 0 on socket 1
+        EAL: Detected lcore 2 as core 1 on socket 0
+        EAL: Detected lcore 3 as core 1 on socket 1
+        EAL: Detected lcore 4 as core 2 on socket 0
+        EAL: Detected lcore 5 as core 2 on socket 1
+        EAL: Detected lcore 6 as core 3 on socket 0
+        EAL: Detected lcore 7 as core 3 on socket 1
+        EAL: Detected lcore 8 as core 4 on socket 0
+        EAL: Detected lcore 9 as core 4 on socket 1
+        EAL: Detected lcore 10 as core 5 on socket 0
+        EAL: Detected lcore 11 as core 5 on socket 1
+        EAL: Detected lcore 12 as core 8 on socket 0
+        EAL: Detected lcore 13 as core 8 on socket 1
+        EAL: Detected lcore 14 as core 9 on socket 0
+        EAL: Detected lcore 15 as core 9 on socket 1
+        EAL: Detected lcore 16 as core 10 on socket 0
+        EAL: Detected lcore 17 as core 10 on socket 1
+        EAL: Detected lcore 18 as core 11 on socket 0
+        EAL: Detected lcore 19 as core 11 on socket 1
+        EAL: Detected lcore 20 as core 12 on socket 0
+        EAL: Detected lcore 21 as core 12 on socket 1
+        EAL: Detected lcore 22 as core 13 on socket 0
+        EAL: Detected lcore 23 as core 13 on socket 1
+        EAL: Support maximum 64 logical core(s) by configuration.
+        EAL: Detected 24 lcore(s)
+        EAL: Setting up memory...
+        EAL: Ask a virtual area of 0x400000000 bytes
+        EAL: Virtual area found at 0x7f1a40000000 (size = 0x400000000)
+        EAL: Ask a virtual area of 0x400000000 bytes
+        EAL: Virtual area found at 0x7f1600000000 (size = 0x400000000)
+        EAL: Requesting 16 pages of size 1024MB from socket 0
+        EAL: Requesting 16 pages of size 1024MB from socket 1
+        EAL: TSC frequency is ~2599995 KHz
+        EAL: Master core 0 is ready (tid=71304880)
+        EAL: Core 2 is ready (tid=6ec6e700)
+        EAL: Core 12 is ready (tid=6c469700)
+        EAL: Core 4 is ready (tid=6e46d700)
+        EAL: Core 6 is ready (tid=6dc6c700)
+        EAL: Core 8 is ready (tid=6d46b700)
+        EAL: Core 10 is ready (tid=6cc6a700)
+        EAL: PCI device 0000:01:00.0 on NUMA socket 0
+        EAL:   probe driver: 8086:10fb rte_ixgbe_pmd
+        EAL:   PCI memory mapped at 0x7f1e7118b000
+        EAL: PCI device 0000:01:00.1 on NUMA socket 0
+        EAL:   probe driver: 8086:10fb rte_ixgbe_pmd
+        EAL:   PCI memory mapped at 0x7f1e6bb69000
+        EAL: PCI device 0000:03:00.0 on NUMA socket 0
+        EAL:   probe driver: 8086:1583 rte_i40e_pmd
+        EAL:   0000:03:00.0 not managed by VFIO driver, skipping
+        EAL:   0000:03:00.0 not managed by UIO driver, skipping
+        EAL: PCI device 0000:03:00.1 on NUMA socket 0
+        EAL:   probe driver: 8086:1583 rte_i40e_pmd
+        EAL:   0000:03:00.1 not managed by VFIO driver, skipping
+        EAL:   0000:03:00.1 not managed by UIO driver, skipping
+        EAL: PCI device 0000:05:00.0 on NUMA socket 0
+        EAL:   probe driver: 8086:1521 rte_igb_pmd
+        EAL:   0000:05:00.0 not managed by VFIO driver, skipping
+        EAL:   0000:05:00.0 not managed by UIO driver, skipping
+        EAL: PCI device 0000:05:00.1 on NUMA socket 0
+        EAL:   probe driver: 8086:1521 rte_igb_pmd
+        EAL:   0000:05:00.1 not managed by VFIO driver, skipping
+        EAL:   0000:05:00.1 not managed by UIO driver, skipping
+        [INFO]  Found 2 usable devices:
+           Device 0: EC:F4:BB:CE:CF:78 (82599EB 10-Gigabit SFI/SFP+ Network Connection)
+           Device 1: EC:F4:BB:CE:CF:7A (82599EB 10-Gigabit SFI/SFP+ Network Connection)
+        
+        
+        
+        Usage: 
+        
+                 opnfv-vsperf.lua Port1 Port2 [Frame Size] [Traffic Direction] [Maximum Acceptable Frame Loss] [Number of Flows] [Maximum Frames Per Second]
+        
+        
+                     where:
+        
+                        Port1 ............................ The first DPDK enabled port of interest, e.g. 0
+        
+                        Port2 ............................ The second DPDK enabled port of interest, e.g. 1
+        
+                        Frame Size ....................... Frame size in bytes.  This is the 'goodput' payload size in bytes.  It does not include
+                                                           the preamble (7 octets), start of frame delimited (1 octet), and interframe gap (12 octets). 
+                                                           The default size is 64. 
+        
+                        Traffic Direction ................ Unidirectional (0) or bidirectional (1) traffic flow between Port1 and Port2.  Default is unidirectional
+        
+                        Maximum Acceptable Frame Loss .... Percentage of acceptable packet loss.  Default is 0
+        
+                        Number of Flows .................. Number of packet flows.  Default is 256
+        
+                        Maximum Frames Per Second ........ The maximum number of frames per second (in Mfps).  For a 10 Gbps connection, this would be 14.88 (also the default)
+
+
+        </pre>
+
+        <b><li>MoonGen opnfv-vsperf.lua execution example</li></b>
+        <pre>
+        [root@perf36 MoonGen]# ./build/MoonGen ./examples/opnfv-vsperf.lua 0 1 64 0 1 12
+        EAL: Detected lcore 0 as core 0 on socket 0
+        EAL: Detected lcore 1 as core 0 on socket 1
+        EAL: Detected lcore 2 as core 1 on socket 0
+        EAL: Detected lcore 3 as core 1 on socket 1
+        EAL: Detected lcore 4 as core 2 on socket 0
+        EAL: Detected lcore 5 as core 2 on socket 1
+        EAL: Detected lcore 6 as core 3 on socket 0
+        EAL: Detected lcore 7 as core 3 on socket 1
+        EAL: Detected lcore 8 as core 4 on socket 0
+        EAL: Detected lcore 9 as core 4 on socket 1
+        EAL: Detected lcore 10 as core 5 on socket 0
+        EAL: Detected lcore 11 as core 5 on socket 1
+        EAL: Detected lcore 12 as core 8 on socket 0
+        EAL: Detected lcore 13 as core 8 on socket 1
+        EAL: Detected lcore 14 as core 9 on socket 0
+        EAL: Detected lcore 15 as core 9 on socket 1
+        EAL: Detected lcore 16 as core 10 on socket 0
+        EAL: Detected lcore 17 as core 10 on socket 1
+        EAL: Detected lcore 18 as core 11 on socket 0
+        EAL: Detected lcore 19 as core 11 on socket 1
+        EAL: Detected lcore 20 as core 12 on socket 0
+        EAL: Detected lcore 21 as core 12 on socket 1
+        EAL: Detected lcore 22 as core 13 on socket 0
+        EAL: Detected lcore 23 as core 13 on socket 1
+        EAL: Support maximum 64 logical core(s) by configuration.
+        EAL: Detected 24 lcore(s)
+        EAL: Setting up memory...
+        EAL: Ask a virtual area of 0x400000000 bytes
+        EAL: Virtual area found at 0x7efc00000000 (size = 0x400000000)
+        EAL: Ask a virtual area of 0x400000000 bytes
+        EAL: Virtual area found at 0x7ef7c0000000 (size = 0x400000000)
+        EAL: Requesting 16 pages of size 1024MB from socket 0
+        EAL: Requesting 16 pages of size 1024MB from socket 1
+        EAL: TSC frequency is ~2599995 KHz
+        EAL: Master core 0 is ready (tid=37555880)
+        EAL: Core 2 is ready (tid=34ebf700)
+        EAL: Core 12 is ready (tid=326ba700)
+        EAL: Core 4 is ready (tid=346be700)
+        EAL: Core 6 is ready (tid=33ebd700)
+        EAL: Core 8 is ready (tid=336bc700)
+        EAL: Core 10 is ready (tid=32ebb700)
+        EAL: PCI device 0000:01:00.0 on NUMA socket 0
+        EAL:   probe driver: 8086:10fb rte_ixgbe_pmd
+        EAL:   PCI memory mapped at 0x7f00373dc000
+        EAL: PCI device 0000:01:00.1 on NUMA socket 0
+        EAL:   probe driver: 8086:10fb rte_ixgbe_pmd
+        EAL:   PCI memory mapped at 0x7f0031dba000
+        EAL: PCI device 0000:03:00.0 on NUMA socket 0
+        EAL:   probe driver: 8086:1583 rte_i40e_pmd
+        EAL:   0000:03:00.0 not managed by VFIO driver, skipping
+        EAL:   0000:03:00.0 not managed by UIO driver, skipping
+        EAL: PCI device 0000:03:00.1 on NUMA socket 0
+        EAL:   probe driver: 8086:1583 rte_i40e_pmd
+        EAL:   0000:03:00.1 not managed by VFIO driver, skipping
+        EAL:   0000:03:00.1 not managed by UIO driver, skipping
+        EAL: PCI device 0000:05:00.0 on NUMA socket 0
+        EAL:   probe driver: 8086:1521 rte_igb_pmd
+        EAL:   0000:05:00.0 not managed by VFIO driver, skipping
+        EAL:   0000:05:00.0 not managed by UIO driver, skipping
+        EAL: PCI device 0000:05:00.1 on NUMA socket 0
+        EAL:   probe driver: 8086:1521 rte_igb_pmd
+        EAL:   0000:05:00.1 not managed by VFIO driver, skipping
+        EAL:   0000:05:00.1 not managed by UIO driver, skipping
+        [INFO]  Found 2 usable devices:
+           Device 0: EC:F4:BB:CE:CF:78 (82599EB 10-Gigabit SFI/SFP+ Network Connection)
+           Device 1: EC:F4:BB:CE:CF:7A (82599EB 10-Gigabit SFI/SFP+ Network Connection)
+        [WARN]  You are using a deprecated method for invoking device.config. config(...) should be used with named arguments. For details: see documentation
+        [WARN]  You are using a deprecated method for invoking device.config. config(...) should be used with named arguments. For details: see documentation
+        [INFO]  Waiting for devices to come up...
+        [INFO]  Device 0 (EC:F4:BB:CE:CF:78) is up: full-duplex 10000 MBit/s
+        [INFO]  Device 1 (EC:F4:BB:CE:CF:7A) is up: full-duplex 10000 MBit/s
+        [INFO]  2 devices are up.
+        TOP OF WHILE LOOP:  Testing with prevPassRate = 0.00, prevFailRate = 14.88, prevRate = 0.00, rate = 14.88
+
+
+        Inside launchTest.  rate = 14.88, bidirec = 0, latency = 0, frame_size = 64, run_time = 60, num_flows = 12, method = software
+
+
+        *********************************************************************************
+        * Testing frame rate (millions per second) with software rate control: 14.88
+        *********************************************************************************
+        [Device: id=1] Received 14877894 packets, current rate 14.88 Mpps, 7617.47 MBit/s, 9997.92 MBit/s wire rate.
+        [Device: id=0] Sent 14878489 packets, current rate 14.88 Mpps, 7617.64 MBit/s, 9998.16 MBit/s wire rate.
+        [Device: id=1] Received 29758371 packets, current rate 14.88 Mpps, 7618.80 MBit/s, 9999.68 MBit/s wire rate.
+        [Device: id=0] Sent 29758929 packets, current rate 14.88 Mpps, 7618.76 MBit/s, 9999.62 MBit/s wire rate.
+        [Device: id=1] Received 44639178 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 44639824 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 59519957 packets, current rate 14.88 Mpps, 7618.93 MBit/s, 9999.85 MBit/s wire rate.
+        [Device: id=0] Sent 59520637 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 74400802 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=0] Sent 74401534 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 89281547 packets, current rate 14.88 Mpps, 7618.91 MBit/s, 9999.83 MBit/s wire rate.
+        [Device: id=0] Sent 89282373 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 104162367 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 104163192 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=1] Received 119043180 packets, current rate 14.88 Mpps, 7618.96 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=0] Sent 119043995 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 133923961 packets, current rate 14.88 Mpps, 7618.93 MBit/s, 9999.85 MBit/s wire rate.
+        [Device: id=0] Sent 133924848 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 148804964 packets, current rate 14.88 Mpps, 7619.07 MBit/s, 10000.03 MBit/s wire rate.
+        [Device: id=0] Sent 148806976 packets, current rate 14.88 Mpps, 7619.21 MBit/s, 10000.21 MBit/s wire rate.
+        [Device: id=1] Received 163683903 packets, current rate 14.88 Mpps, 7617.99 MBit/s, 9998.61 MBit/s wire rate.
+        [Device: id=0] Sent 163685390 packets, current rate 14.88 Mpps, 7617.70 MBit/s, 9998.23 MBit/s wire rate.
+        [Device: id=1] Received 178564682 packets, current rate 14.88 Mpps, 7618.93 MBit/s, 9999.85 MBit/s wire rate.
+        [Device: id=0] Sent 178566192 packets, current rate 14.88 Mpps, 7618.96 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=1] Received 193445471 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 193447051 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 208326281 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 208327913 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 223207091 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 223208751 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 238087878 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 238089576 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 252968688 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 252970720 packets, current rate 14.88 Mpps, 7619.15 MBit/s, 10000.13 MBit/s wire rate.
+        [Device: id=1] Received 267849205 packets, current rate 14.88 Mpps, 7618.81 MBit/s, 9999.68 MBit/s wire rate.
+        [Device: id=0] Sent 267850517 packets, current rate 14.88 Mpps, 7618.44 MBit/s, 9999.20 MBit/s wire rate.
+        [Device: id=1] Received 282729960 packets, current rate 14.88 Mpps, 7618.93 MBit/s, 9999.85 MBit/s wire rate.
+        [Device: id=0] Sent 282731377 packets, current rate 14.88 Mpps, 7618.96 MBit/s, 9999.88 MBit/s wire rate.
+        [Device: id=1] Received 297610770 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 297612204 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 312491580 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 312493923 packets, current rate 14.88 Mpps, 7618.84 MBit/s, 9999.73 MBit/s wire rate.
+        [Device: id=1] Received 327372122 packets, current rate 14.88 Mpps, 7618.81 MBit/s, 9999.69 MBit/s wire rate.
+        [Device: id=0] Sent 327374601 packets, current rate 14.88 Mpps, 7618.89 MBit/s, 9999.80 MBit/s wire rate.
+        [Device: id=1] Received 342252933 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 342255464 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 357133742 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 357136323 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 372014530 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 372017160 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 386895340 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 386898021 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 401776150 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 401778882 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 416656942 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 416659719 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 431537783 packets, current rate 14.88 Mpps, 7618.96 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=0] Sent 431540596 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=1] Received 446418539 packets, current rate 14.88 Mpps, 7618.93 MBit/s, 9999.85 MBit/s wire rate.
+        [Device: id=0] Sent 446421417 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=1] Received 461299350 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 461302279 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 476180158 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 476183138 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 491060948 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 491063952 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 505941756 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 505944773 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 520822566 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 520825634 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 535703354 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 535706499 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 550584166 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 550587349 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 565464953 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 565468169 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 580345764 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 580349032 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 595226573 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 595229905 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 610107360 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 610110729 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 624988171 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 624991589 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 639868982 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 639872467 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 654749770 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 654753288 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 669630580 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 669634149 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 684511368 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 684515011 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 699392210 packets, current rate 14.88 Mpps, 7618.96 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=0] Sent 699395839 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=1] Received 714272989 packets, current rate 14.88 Mpps, 7618.93 MBit/s, 9999.85 MBit/s wire rate.
+        [Device: id=0] Sent 714276643 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=1] Received 729153775 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 729157483 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 744034585 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 744038344 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 758915395 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 758919203 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 773796184 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 773800040 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 788676995 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 788680900 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 803557780 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 803561738 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 818438591 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 818442601 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 833319400 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 833323461 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 848200190 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 848204298 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 863080999 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 863085159 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 877961813 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 877966020 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 892831653 packets, current rate 9.92 Mpps, 5078.95 MBit/s, 6666.13 MBit/s wire rate.
+        [Device: id=0] Sent 892831653 packets, current rate 9.92 Mpps, 5077.92 MBit/s, 6664.77 MBit/s wire rate.
+        [Device: id=0] Sent 892831653 packets with 57141225792 bytes payload (including CRC).
+        [Device: id=0] Sent 14.796628 (StdDev 0.646119) Mpps, 7575.873635 (StdDev 330.813103) MBit/s, 9943.334168 (StdDev 434.192115) MBit/s wire rate on average.
+        [Device: id=1] Received 892831653 packets with 57141225792 bytes payload (including CRC).
+        [Device: id=1] Received 14.796631 (StdDev 0.645851) Mpps, 7575.874873 (StdDev 330.676209) MBit/s, 9943.335789 (StdDev 434.012442) MBit/s wire rate on average.
+        *********************************************************************************************************************************
+        * Test Result:  PASSED - The traffic thoughput loss was 0.00000000 %, was did not exceed the maximum allowed loss (1.00 %)
+        *********************************************************************************************************************************
+        PASS WHILE LOOP:  Testing with prevPassRate = 14.88, prevFailRate = 14.88, prevRate = 14.88, 'new'rate = 14.88
+
+
+
+
+
+
+        *********************************************************************************************
+        * Starting final validation
+        *********************************************************************************************
+
+
+
+        VALIDATION WHILE LOOP:  Testing with prevPassRate = 14.88, prevFailRate = 14.88, prevRate = 14.88, rate = 14.88
+
+
+        Inside launchTest.  rate = 14.88, bidirec = 0, latency = 0, frame_size = 64, run_time = 60, num_flows = 12, method = software
+
+
+        *********************************************************************************
+        * Testing frame rate (millions per second) with software rate control: 14.88
+        *********************************************************************************
+        [Device: id=1] Received 14877520 packets, current rate 14.88 Mpps, 7617.29 MBit/s, 9997.69 MBit/s wire rate.
+        [Device: id=0] Sent 14878114 packets, current rate 14.88 Mpps, 7617.46 MBit/s, 9997.92 MBit/s wire rate.
+        [Device: id=1] Received 29758304 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 29759007 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 44639113 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 44639883 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 59519924 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 59521149 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=1] Received 74400708 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 74402003 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 89281516 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 89282833 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 104162305 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 104163694 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 119043116 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 119044560 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=1] Received 133923930 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 133925387 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 148804916 packets, current rate 14.88 Mpps, 7619.06 MBit/s, 10000.02 MBit/s wire rate.
+        [Device: id=0] Sent 148807025 packets, current rate 14.88 Mpps, 7619.22 MBit/s, 10000.22 MBit/s wire rate.
+        [Device: id=1] Received 163682903 packets, current rate 14.88 Mpps, 7617.50 MBit/s, 9997.97 MBit/s wire rate.
+        [Device: id=0] Sent 163684300 packets, current rate 14.88 Mpps, 7617.14 MBit/s, 9997.50 MBit/s wire rate.
+        [Device: id=1] Received 178563687 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 178565423 packets, current rate 14.88 Mpps, 7619.13 MBit/s, 10000.11 MBit/s wire rate.
+        [Device: id=1] Received 193442890 packets, current rate 14.88 Mpps, 7618.13 MBit/s, 9998.80 MBit/s wire rate.
+        [Device: id=0] Sent 193444291 packets, current rate 14.88 Mpps, 7617.92 MBit/s, 9998.53 MBit/s wire rate.
+        [Device: id=1] Received 208323678 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 208325099 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 223204486 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 223205941 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 238085296 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 238086807 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 252966100 packets, current rate 14.88 Mpps, 7618.96 MBit/s, 9999.88 MBit/s wire rate.
+        [Device: id=0] Sent 252967674 packets, current rate 14.88 Mpps, 7618.98 MBit/s, 9999.91 MBit/s wire rate.
+        [Device: id=1] Received 267846896 packets, current rate 14.88 Mpps, 7618.94 MBit/s, 9999.86 MBit/s wire rate.
+        [Device: id=0] Sent 267848503 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.89 MBit/s wire rate.
+        [Device: id=1] Received 282727681 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 282729379 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 297608492 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 297610269 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 312489303 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 312491919 packets, current rate 14.88 Mpps, 7618.51 MBit/s, 9999.29 MBit/s wire rate.
+        [Device: id=1] Received 327369303 packets, current rate 14.88 Mpps, 7618.53 MBit/s, 9999.32 MBit/s wire rate.
+        [Device: id=0] Sent 327372386 packets, current rate 14.88 Mpps, 7618.78 MBit/s, 9999.65 MBit/s wire rate.
+        [Device: id=1] Received 342250114 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 342253220 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 357130901 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 357134084 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 372011728 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 372014929 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 386892500 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 386895778 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 401773309 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 401776623 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 416654119 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 416657466 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 431534908 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 431538322 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 446415719 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 446419173 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 461296528 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 461300027 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 476177331 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 476180877 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 491058125 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 491061707 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 505938951 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 505942568 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 520819724 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 520823427 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 535700533 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 535704265 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 550581321 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 550585127 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 565462131 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 565465986 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 580342941 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 580346825 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 595223728 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 595227686 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 610104538 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 610108522 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 624985341 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 624989384 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 639866137 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 639870244 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 654746946 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 654751081 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 669627734 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 669631943 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 684508544 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 684512802 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 699389355 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 699393641 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 714270142 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 714274501 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 729150954 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 729155339 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 744031754 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 744036199 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 758912549 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 758917059 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 773793361 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 773797899 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 788674148 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 788678757 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 803554959 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 803559618 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 818435768 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 818440457 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 833316556 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 833321316 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 848197367 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 848202155 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 863078155 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 863083014 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 877958966 packets, current rate 14.88 Mpps, 7618.95 MBit/s, 9999.87 MBit/s wire rate.
+        [Device: id=0] Sent 877963876 packets, current rate 14.88 Mpps, 7618.97 MBit/s, 9999.90 MBit/s wire rate.
+        [Device: id=1] Received 892829826 packets, current rate 9.92 Mpps, 5079.07 MBit/s, 6666.28 MBit/s wire rate.
+        [Device: id=0] Sent 892829826 packets, current rate 9.92 Mpps, 5077.98 MBit/s, 6664.85 MBit/s wire rate.
+        [Device: id=0] Sent 892829826 packets with 57141108864 bytes payload (including CRC).
+        [Device: id=0] Sent 14.796588 (StdDev 0.646097) Mpps, 7575.852814 (StdDev 330.802118) MBit/s, 9943.306840 (StdDev 434.177696) MBit/s wire rate on average.
+        [Device: id=1] Received 892829826 packets with 57141108864 bytes payload (including CRC).
+        [Device: id=1] Received 14.796593 (StdDev 0.645815) Mpps, 7575.855537 (StdDev 330.657820) MBit/s, 9943.310411 (StdDev 433.988292) MBit/s wire rate on average.
+
+
+
+        *********************************************************************************************
+        * Stopping final validation
+        *********************************************************************************************
+
+
+
+
+
+        *********************************************************************************************
+        * Final Validation Test Result:  PASSED
+        *     The validation of 14.80 Mfps passed because the traffic throughput loss was 0.00000000 %, 
+        *     which did not exceed the maximum allowed (1.00 %) loss
+        *********************************************************************************************
+
+
+        #############################################################################################
+
+        RFC 2544 Test Results Summary From Final Validation
+
+
+        Measured Aggregate Average Throughput (Mfps) ................ 14.80
+        Frame Size .................................................. 64
+        Traffic Flow Direction ...................................... Unidirectional
+        Maximum Theoretical Line Rate Throughput (Mfps) ............. 14.88
+        Number of Data Flows ........................................ 12
+        Rate Resolution (%) ......................................... 0.02
+        Maximum Acceptable Frame Loss (%) ........................... 1.00
+
+
+        Network Device ID ........................................... 0
+            Average Rx Frame Count (Mfps) ........................... 14.80
+            Rx Frame Count .......................................... 0
+            Tx Frame Count .......................................... 892829826
+            Frame Loss .............................................. 0
+
+
+        Network Device ID ........................................... 1
+            Average Rx Frame Count (Mfps) ........................... 0.00
+            Rx Frame Count .......................................... 892829826
+            Tx Frame Count .......................................... 0
+            Frame Loss .............................................. 0
+
+        #############################################################################################
+
+        </pre>
+    </ol>
+
+    </body>
+</html>
