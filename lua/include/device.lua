@@ -574,7 +574,7 @@ function txQueue:setRate(rate)
 	if id == mod.PCI_ID_X710 or id == mod.PCI_ID_XL710 then
 		-- obviously fails if doing that from multiple threads; but you shouldn't do that anways
 		dev.totalRate = dev.totalRate or 0
-		dev.totalRate = dev.totalRate + rate
+		dev.totalRate = rate
 		log:warn("Per-queue rate limit NYI on this device, setting per-device rate limit to %d instead", dev.totalRate)
 		self.dev:setRate(dev.totalRate)
 		return
