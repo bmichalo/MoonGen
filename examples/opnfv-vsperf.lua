@@ -105,9 +105,11 @@ function master(...)
 			else
 				if finalValidation then
 					finalValidation = false
+					nextRate = testParams.rate - testParams.rate_granularity
+				else
+					nextRate = (prevPassRate + testParams.rate ) / 2
 				end
-				nextRate = (prevPassRate + testParams.rate ) / 2
-				if math.abs(nextRate - testParams.rate) <= testParams.rate_granularity then
+				if math.abs(nextRate - testParams.rate) < testParams.rate_granularity then
 					-- since the rate difference from the previous *passing* test rate and next rate is not greater than rate_granularity, the next run is a "final validation"
 					finalValidation = true
 				end
@@ -342,7 +344,7 @@ function calibrateSlave(dev, numQueues, desiredRate, calibratedStartRate, frame_
 	local mem = memory.createMemPool(function(buf)
 		buf:getUdpPacket():fill{
 			pktLength = frame_size_without_crc, -- this sets all length headers fields in all used protocols
-			ethSrc = txQueue, -- get the src mac from the device
+			ethSrc = dev:getTxQueue(0), -- get the src mac from the device
 			ethDst = ETH_DST,
 			ip4Dst = IP_DST,
 			udpSrc = PORT_SRC,
@@ -446,7 +448,7 @@ function loadSlave(dev, numQueues, rate, calibratedRate, frame_size, run_time, n
 	local mem = memory.createMemPool(function(buf)
 		buf:getUdpPacket():fill{
 			pktLength = frame_size_without_crc, -- this sets all length headers fields in all used protocols
-			ethSrc = txQueue, -- get the src mac from the device
+			ethSrc = dev:getTxQueue(0), -- get the src mac from the device
 			ethDst = ETH_DST,
 			ip4Dst = IP_DST,
 			udpSrc = PORT_SRC,
