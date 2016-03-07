@@ -71,7 +71,7 @@ function master(...)
 	local finalValidation = false
 	local prevRate = 0
 	local prevPassRate = 0
-	local prevFailRate = testParams.rate
+	local prevFailRate = testParams.startRate
 	local rateAttempts = {0}
 	local maxRateAttempts = 2 -- the number of times we will allow MoonGen to get the Tx rate correct
 	if ( method == "hardware" ) then
@@ -83,7 +83,8 @@ function master(...)
 	local rxStats = {}
         local devs = prepareDevs(testParams)
 	printf("Starting binary search for maximum throughput with no more than %.8f%% packet loss", testParams.acceptableLossPct);
-	while ( math.abs(testParams.rate - prevRate) > testParams.rate_granularity or finalValidation ) do
+	testParams.rate = testParams.startRate
+	while ( math.abs(testParams.rate - prevRate) >= testParams.rate_granularity or finalValidation ) do
 		launchTest(finalValidation, devs, testParams, txStats, rxStats)
 		if acceptableRate(tx_rate_tolerance, testParams.rate, txStats, maxRateAttempts, rateAttempts) then
 			--rate = dev1_avg_txMpps -- the actual rate may be lower, so correct "rate"
@@ -145,12 +146,12 @@ function showReport(rxStats, txStats, testParams)
 			totalTxFrames = totalTxFrames + txStats[i].totalFrames
 			totalLostFrames = totalLostFrames + lostFrames
 			totalLostFramePct = 100 * totalLostFrames / totalTxFrames
-			printf("[REPORT]Device %d->%d: Tx frames: %d Rx Frames: %d frame loss: %d, %.8f%% Rx Mpps: %.2f",
+			printf("[REPORT]Device %d->%d: Tx frames: %d Rx Frames: %d frame loss: %d, %f%% Rx Mpps: %f",
 			 (i-1), (testParams.connections[i]-1), txStats[i].totalFrames,
 			 rxStats[testParams.connections[i]].totalFrames, lostFrames, lostFramePct, rxMpps)
 		end
 	end
-	printf("[REPORT]      total: Tx frames: %d Rx Frames: %d frame loss: %d, %.8f%% Rx Mpps: %.2f",
+	printf("[REPORT]      total: Tx frames: %d Rx Frames: %d frame loss: %d, %f%% Rx Mpps: %f",
 	 totalTxFrames, totalRxFrames, totalLostFrames, totalLostFramePct, totalRxMpps)
 	local portList = ""
 	local count = 0
@@ -162,8 +163,8 @@ function showReport(rxStats, txStats, testParams)
 		end
 		count = count + 1
 	end
-	printf("[PARAMETERS] rate: %.f frameSize: %d runBidirec: %s searchRunTime: %d validationRunTime: %d acceptableLossPct: %.f ports: %s",
-	 testParams.rate, testParams.frameSize, testParams.runBidirec, testParams.searchRunTime, testParams.validationRunTime, testParams.acceptableLossPct, portList) 
+	printf("[PARAMETERS] startRate: %f frameSize: %d runBidirec: %s searchRunTime: %d validationRunTime: %d acceptableLossPct: %f ports: %s",
+	 testParams.startRate, testParams.frameSize, testParams.runBidirec, testParams.searchRunTime, testParams.validationRunTime, testParams.acceptableLossPct, portList) 
 end
 
 function prepareDevs(testParams)
@@ -220,7 +221,7 @@ function getTestParams(testParams)
 	local testParams = cfg
 	testParams.frameSize = testParams.frameSize or FRAME_SIZE
 	local max_line_rate_Mfps = (LINE_RATE /(testParams.frameSize*8 +64 +96) /1000000) --max_line_rate_Mfps is in millions per second
-	testParams.rate = testParams.rate or max_line_rate_Mfps
+	testParams.startRate = testParams.startRate or max_line_rate_Mfps
 	testParams.txMethod = "hardware"
 	testParams.testLatency = TEST_LATENCY
 	testParams.runBidirec = testParams.runBidirec or false
