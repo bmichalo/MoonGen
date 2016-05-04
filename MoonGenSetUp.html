@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>MoonGen Set Up Procedure</title>
+    </head>
+    <body>
+    <h1>MoonGen</h1>
+    Note I am a user of the MoonGen application and not the author.  The original code and documentation can be found here: <br><br>
+    <a href="https://github.com/emmericp/MoonGen">MoonGen GitHub</a><br><br>
+    The follow notes regarding MoonGen installation and execution are meant to be used in concert with the original documenation 
+    as detailed within the README file of the above github.  I have modified the MoonGen application slightly to suite my needs - although 
+    whole overall process does not deviate too much from the original. 
+    <h2>MoonGen Installation Notes</h2>
+    <ol>
+        <b><li>Review README.md and install dependencies</li></b>
+        <br>
+        Review the <a href="https://github.com/bmichalo/MoonGen/blob/opnfv/README.md">README</a> file and 
+        install via your Linux distribution's package manager (e.g., "yum install make") the needed dependencies: <br>
+        <ul>
+            <li>gcc</li> 
+            <li>make</li>
+            <li>cmake</li>
+            <li>kernel headers</li>
+        </ul>
+        <br>
+
+        <b><li>Download the MoonGen source code (note my github cloned from the original)</li></b>
+        <pre>
+        [root@LinuxServer MoonGen]# git clone https://github.com/bmichalo/MoonGen
+        </pre>
+
+        <b><li>List the remote branches</li></b>
+        <pre>
+        [root@LinuxServer MoonGen]# cd MoonGen 
+        [root@LinuxServer MoonGen]# git branch -a
+        * master
+          dpdk2.x-opnfv
+          remotes/origin/HEAD -> origin/master
+          remotes/origin/dpdk2.x-opnfv
+          remotes/origin/master
+          remotes/origin/opnfv
+          remotes/upstream/dpdk2.x-opnfv
+          remotes/upstream/master
+          remotes/upstream/opnfv
+        </pre>
+
+        <b><li>Initialize submodules</li></b>
+        <pre>
+        [root@LinuxServer MoonGen]# git submodule update --init 
+        </pre>
+
+        <b><li>Verify the opnfv-vsperf.lua script</li></b>
+        <pre>
+        [root@LinuxServer MoonGen]# ls examples/opnfv-vsperf.lua
+        examples/opnfv-vsperf.lua
+        </pre>
+
+        <b><li>Note the DPDK version</li></b>
+        <br>
+        Make note of the DPDK version by observing the contents of:  MoonGen/deps/dpdk/pkg/dpdk-core.spec
+        <pre>
+        [root@LinuxServer MoonGen]# grep Version deps/dpdk/pkg/dpdk.spec 
+        Version: 2.2.0 
+        </pre>
+            
+        <b><li>Build MoonGen</li></b>
+        <pre>
+        [root@LinuxServer MoonGen] ./build.sh 
+        </pre>
+
+        
+        <b><li>Hugepage allocation</li></b>
+        <br>
+        Set up the huge allocation via setup-hugetlbfs.sh, or can do it via parameters at boot time thus will be persistant across system reboots, e.g.:<br>
+        <pre>
+        [root@LinuxServer MoonGen]# ./setup-hugetlbfs.sh 
+        </pre>
+        or
+        <pre>
+        [root@LinuxServer MoonGen]# cat /proc/cmdline
+        BOOT_IMAGE=/vmlinuz-3.10.0-325.el7.x86_64 root=/dev/mapper/LinuxServer_rhel72-root ro crashkernel=auto rd.lvm.lv=LinuxServer_rhel72/root rd.lvm.lv=LinuxServer_rhel72/swap rhgb quiet LANG=en_US.UTF-8 intel_iommu=on default_hugepagesz=1G hugepagesz=1G hugepages=32 selinux=0 iommu=pt
+        </pre>
+        via using for example the grubby utility:<br>
+        <pre>
+        [root@LinuxServer MoonGen]# grubby --update-kernel=`grubby --default-kernel` --args="default_hugepagesz=1G hugepagesz=1G hugepages=32"
+        </pre>
+        Note that if the boot command line is modified, a reboot must occur in order to allocate memory with the new hugepage settings.
+        <br>
+        <br>
+
+
+        <b><li>Bind DPDK to interfaces of interest</li></b>
+        <br>
+        DPDK bypasses the native Linux networking stack and uses a userspace poll mode driver to transmit and receive packets from the wire.  This is known as 
+        a "pass through mode".  There are at least a few flavors of kernel drivers that will enable this packet pass through:
+        <br>
+        <br>
+        <dl>
+            <dt><b>uio_pci_generic</b></dt>
+            <dd>Generic User I/O kernel modules packaged with Linux kernel</dd>
+            <dt><b>igb_uio</b></dt>
+            <dd>User I/O kernel modules packaged with MoonGen (within the DPDK dependency).  igb_uio built within MoonGen dependencies and Intel specific</dd>
+            <dt><b>vfio-pci</b></dt>
+            <dd>A more secure User I/O kernel driver that utilizes IOMMU hardware.  If using an Intel processor with IOMMU 
+                supported hardware, the kernel bootloader parameter 'intel_iommu=on' must be added and can be again done using the 'grubby' utility  (grubby --update-kernel=`grubby --default-kernel` --args="intel_iommu=on") and then reboot</dd>
+        </dl>
+        <br>
+        It is recommended that if hardware support for IOMMU is there, use vfio-pci.  If not, use uio_pci_generic or igb_uio.  One way to determine if IOMMU support is 
+        present is to look into the kernel log:<br>
+        <pre>
+        [root@perf84 ~]# dmesg | grep -i IOMMU
+        [    0.000000 ] Intel-IOMMU: enabled
+        </pre>
+        Determine the PCI 'Doman:Bus:Device:Function' information for the interfaces which you want to use MoonGen (and thus bind DPDK).  This can be done 
+        via the 'ethtool' (yum install ethtool) utility via 'ethtool -i <interface_name>', e.g.:
+        <pre>
+        [root@LinuxServer MoonGen]# ethtool -i em1 | grep 'bus-info'
+        bus-info: 0000:01:00.0
+        [root@LinuxServer MoonGen]# ethtool -i em2 | grep 'bus-info'
+        bus-info: 0000:01:00.1
+        </pre>
+        where in this case network devices 'em1' and 'em2' are both 10G capable ports where its desired to use MoonGen to TX/RX traffic.
+        <br>
+        This can also be seen via the DPDK utility 'dpdk_nic_bind.py' again under MoonGen's DPDK dependency directory:
+        <br>
+        <pre>
+        [root@LinuxServer MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --status
+
+        Network devices using DPDK-compatible driver
+        ============================================
+        &ltnone&gt
+
+        Network devices using kernel driver
+        ===================================
+        0000:01:00.0 '82599ES 10-Gigabit SFI/SFP+ Network Connection' if=em1 drv=ixgbe unused= 
+        0000:01:00.1 '82599ES 10-Gigabit SFI/SFP+ Network Connection' if=em2 drv=ixgbe unused= 
+        0000:03:00.0 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p1 drv=i40e unused= 
+        0000:03:00.1 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p2 drv=i40e unused= 
+        0000:05:00.0 'I350 Gigabit Network Connection' if=em3 drv=igb unused= *Active*
+        0000:05:00.1 'I350 Gigabit Network Connection' if=em4 drv=igb unused= 
+
+        Other network devices
+        =====================
+        &ltnone&gt
+        </pre>
+
+        Use 'dpdk_nic_bind.py' to unbind network devices from current drivers.  In this case, its ixgbe.  Before doing the unbind, shutdown the interfaces.
+        <br>
+        <pre>
+
+        [root@LinuxServer MoonGen]# ifdown em1 
+        [root@LinuxServer MoonGen]# ifdown em2 
+        [root@LinuxServer MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --unbind 0000:01:00.0 0000:01:00.1
+
+        </pre>
+
+        Again using 'dpdk_nic_bind.py', bind DPDK to the interfaces to be used with MoonGen.  In this case, the two 10G network devices will be used:<br>
+
+        <pre>
+        [root@LinuxServer MoonGen]# modprobe vfio-pci
+        [root@LinuxServer MoonGen]# 
+        [root@LinuxServer MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --bind=vfio-pci 0000:01:00.0 0000:01:00.1
+        </pre>
+
+        And now we can see that the 10G network devices are bound to the appropriate DPDK supported driver:
+        <br>
+        <pre>
+        [root@LinuxServer MoonGen]# ./deps/dpdk/tools/dpdk_nic_bind.py --status
+        
+        Network devices using DPDK-compatible driver
+        ============================================
+        0000:01:00.0 '82599ES 10-Gigabit SFI/SFP+ Network Connection' drv=vfio-pci unused=
+        0000:01:00.1 '82599ES 10-Gigabit SFI/SFP+ Network Connection' drv=vfio-pci unused=
+        
+        Network devices using kernel driver
+        ===================================
+        0000:03:00.0 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p1 drv=i40e unused=vfio-pci 
+        0000:03:00.1 'Ethernet Controller XL710 for 40GbE QSFP+' if=p3p2 drv=i40e unused=vfio-pci 
+        0000:05:00.0 'I350 Gigabit Network Connection' if=em3 drv=igb unused=vfio-pci *Active*
+        0000:05:00.1 'I350 Gigabit Network Connection' if=em4 drv=igb unused=vfio-pci 
+        
+        Other network devices
+        =====================
+        &ltnone&gt
+        </pre>
+
+        <b><li>Running MoonGen</li></b>
+	MoonGen has several default parameters that can be overwritten via a configuration file 
+	called 'opnfv-vsperf-cfg.lua'.  Note the different default parameter values at the top of MoonGen/examples/opnfv-vsperf.lua
+        <pre>
+        [root@LinuxServer MoonGen]# more examples/opnfv-vsperf.lua 
+        -- This program provides a RFC2544-like testing of network devices, using
+        -- libaries from the MoonGen packet generator and DPDK.  This program
+        -- is typically from within a MoonGen source tree, for example:
+        --
+        -- cd MoonGen
+        -- build/MoonGen examples/opnfv-vsperf.lua
+        --
+        -- The test will run a binary search to find the maximum packet rate while
+        -- not exceeding a defined percentage packet loss.
+        --
+        -- The test parameters can be altered by created a file, opnfv-vsperf-cfg.lua
+        -- in the current working directory.  The file is lua syntax and describes the
+        -- test paramters.  For example:
+        --
+        -- VSPERF {
+        --	rate = 5,
+        --	runBidirec = true,
+        --	ports = {0,1,2,3}
+        -- 
+        }
+        --
+        -- paramters that may be used:
+        -- ports		A list of DPDK ports to use, for example {0,1}.  Minimum is 1 pair, and more than 1 pair can be used.
+        --			It is assumed that for each pair, packets transmitted out the first port will arrive on the second port (and the reverse)
+        -- rate			Float: The packet rate in millions/sec to start testing (default is 14.88).
+        -- runBidirec		true or false: If true all ports transmit packets (and receive).  If false, only every other port transmits packets.
+        -- txMethod		"hardware" or "software": The method to transmit packets (hardware recommended when adapter support is available).
+        -- testLatency		true or false: If true, collect timestamps for some packets for round-trip latency.
+        -- nrFlows		Integer: The number of unique network flows to generate.
+        -- searchRunTime	Integer: The number of seconds to run a test when doing binary search.
+        -- validationRunTime	Integer: The number of seconds to run a test when doing final validation.
+        -- acceptableLossPct	Float: The maximum percentage of packet loss allowed to consider a test as passing.
+        -- rate_granularity	testParams.rate_granularity or RATE_GRANULARITY
+        -- txQueuesPerDev	Integer: The number of queues to use when transmitting packets.  The default is 3 and should not need to be changed
+        -- frameSize		Integer: the size of the Ethernet frame (including CRC)
+
+        </pre>
+	Once the configuration file is created (or not if default parameters are desired), invoking MoonGen can be done as follows:
+	<pre>
+	[root@LinuxServer MoonGen]# ./build/MoonGen ./examples/opnfv-vsperf.lua
+	</pre>
+        <b><li>Poll Mode Thread Pinning</li></b>
+	MoonGen can take advantage of pinning forwarding threads to particular cores.  To specify which cores MoonGen should use, edit 
+	MoonGen/lua/dpdk-conf.lua and change the 'cores' parameter:
+        <pre>
+	[root@LinuxServer MoonGen]# more lua/dpdk-conf.lua 
+	-- configuration for all DPDK command line parameters
+	-- see DPDK documentation for more details
+	-- MoonGen tries to choose reasonable defaults, so this config file can almost always be empty
+	DPDKConfig {
+		-- configure the cores to use, either as a bitmask or as a list
+		-- default: all cores
+		--cores = 0x0F, -- use the first 4 cores
+		cores = {0, 2, 4, 6, 8, 10, 12},
+	
+	}
+        </pre>
+    </ol>
+
+    </body>
+</html>
