@@ -10,6 +10,7 @@ local bor, band, bnot, rshift, lshift, bswap = bit.bor, bit.band, bit.bnot, bit.
 local write = io.write
 local format = string.format
 local random, log, floor = math.random, math.log, math.floor
+local ffi = require "ffi"
 
 --- Print a formatted string.
 --- @todo docu
@@ -18,6 +19,16 @@ local random, log, floor = math.random, math.log, math.floor
 --- @param return
 function printf(str, ...)
 	return print(str:format(...))
+end
+
+ffi.cdef[[
+void print_ptr(void* ptr);
+]]
+
+--- Print a C pointer
+-- @param ptr The pointer to print
+function printPtr(ptr)
+	ffi.Cprint_ptr(ptr)
 end
 
 --- Print a formatted error string.
@@ -142,8 +153,6 @@ _G.bswap = bswap -- export bit.bswap to global namespace to be consistent with b
 hton = bswap
 ntoh = hton
 
-local ffi = require "ffi"
-
 ffi.cdef [[
 	typedef int clockid_t;
 	struct timeval {
@@ -203,6 +212,17 @@ function checksum(data, len)
 	local cs = 0
 	for i = 0, len / 2 - 1 do
 		cs = cs + data[i]
+		if cs >= 2^16 then
+			cs = band(cs, 0xFFFF) + 1
+		end
+	end
+	-- missing the very last uint_8 for odd sized packets
+	-- note that this access is always valid in MoonGen
+	--  * buffers are a fixed even size >= pkt len
+	--  * pkt length is just metadata and not the actual length of the buffer
+	if (len % 2) == 1 then
+		-- simply null the byte outside of our packet
+		cs = cs + band(data[len / 2], 0xFF)
 		if cs >= 2^16 then
 			cs = band(cs, 0xFFFF) + 1
 		end

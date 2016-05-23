@@ -71,7 +71,7 @@ end
 --- Offload VLAN tagging to the NIC for this packet.
 function pkt:setVlan(vlan, pcp, cfi)
 	local tci = vlan + bit.lshift(pcp or 0, 13) + bit.lshift(cfi or 0, 12)
-	self.pkt.vlan_tci = tci
+	self.vlan_tci = tci
 	self.ol_flags = bit.bor(self.ol_flags, dpdk.PKT_TX_VLAN_PKT)
 end
 
@@ -82,7 +82,7 @@ function pkt:getVlan()
 	if bit.bor(self.ol_flags, VLAN_VALID_MASK) == 0 then
 		return nil
 	end
-	local tci = self.pkt.vlan_tci
+	local tci = self.vlan_tci
 	return bit.band(tci, 0xFFF), bit.rshift(tci, 13), bit.band(bit.rshift(tci, 12), 1)
 end
 
@@ -90,7 +90,7 @@ local uint64Ptr = ffi.typeof("uint64_t*")
 
 function pkt:getSoftwareTxTimestamp(offs)
 	local offs = offs and offs / 8 or 6 -- default from sendWithTimestamp
-	return uint64Ptr(self.pkt.data)[offs]
+	return uint64Ptr(self:getData())[offs]
 end
 
 function pkt:getSoftwareRxTimestamp(offs)
@@ -115,7 +115,7 @@ function pkt:setSize(size)
 end
 
 function pkt:getSize()
-	return self.pkt.pkt_len
+	return self.pkt_len
 end
 
 --- Returns the packet data cast to the best fitting packet struct. 
@@ -573,16 +573,20 @@ function packetCalculateChecksums(args)
 		local header, member = getHeaderMember(v)
 		
 		-- if the header has a checksum, call the function
-		if header == "ip4" or header == "icmp" then -- FIXME NYI or header == "udp" or header == "tcp" then
+		if header == "ip4" or header == "icmp" then -- FIXME NYI or header == "udp"
 			str = str .. [[
 				self.]] .. member .. [[:calculateChecksum()
+				]]
+		elseif header == "tcp" then
+			str = str .. [[
+				self.]] .. member .. [[:calculateChecksum(data, len, ipv4)
 				]]
 		end
 	end
 	
 	-- build complete function
 	str = [[
-		return function(self)]] 
+		return function(self, data, len, ipv4)]] 
 			.. str .. [[
 		end]]
 	
