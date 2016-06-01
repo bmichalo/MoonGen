@@ -287,9 +287,10 @@ function rxCounter:print(event, ...)
 	printStats(self, "rxStats", event, ...)
 end
 
-function rxCounter:update()
+function rxCounter:update(interval)
+	local interval = interval or 1
 	local time = dpdk.getTime()
-	if self.lastUpdate and time <= self.lastUpdate + 1 then
+	if self.lastUpdate and time <= self.lastUpdate + interval then
 		return
 	end
 	local pkts, bytes = self:getThroughput()
@@ -322,11 +323,12 @@ end
 
 
 --- Manual rx counter
-function manualRxCounter:update(pkts, bytes)
+function manualRxCounter:update(pkts, bytes, interval)
 	self.current = self.current + pkts
 	self.currentBytes = self.currentBytes + bytes
+	interval = interval or 1
 	local time = dpdk.getTime()
-	if self.lastUpdate and time <= self.lastUpdate + 1 then
+	if self.lastUpdate and time <= self.lastUpdate + interval then
 		return
 	end
 	local pkts, bytes = self:getThroughput()
@@ -339,11 +341,12 @@ function manualRxCounter:getThroughput()
 	return pkts, bytes
 end
 
-function manualRxCounter:updateWithSize(pkts, size)
+function manualRxCounter:updateWithSize(pkts, size, interval)
 	self.current = self.current + pkts
 	self.currentBytes = self.currentBytes + pkts * (size + 4)
+	interval = interval or 1
 	local time = dpdk.getTime()
-	if self.lastUpdate and time <= self.lastUpdate + 1 then
+	if self.lastUpdate and time <= self.lastUpdate + interval then
 		return
 	end
 	local pkts, bytes = self:getThroughput()
@@ -410,9 +413,10 @@ function txCounter:print(event, ...)
 end
 
 --- Device-based counter
-function txCounter:update()
+function txCounter:update(interval)
+	interval = interval or 1
 	local time = dpdk.getTime()
-	if self.lastUpdate and time <= self.lastUpdate + 1 then
+	if self.lastUpdate and time <= self.lastUpdate + interval then
 		return
 	end
 	local pkts, bytes = self:getThroughput()
@@ -445,22 +449,24 @@ function pktTxCounter:getThroughput()
 end
 
 --- Manual rx counter
-function manualTxCounter:update(pkts, bytes)
+function manualTxCounter:update(pkts, bytes, interval)
 	self.current = self.current + pkts
 	self.currentBytes = self.currentBytes + bytes
+	interval = interval or 1
 	local time = dpdk.getTime()
-	if self.lastUpdate and time <= self.lastUpdate + 1 then
+	if self.lastUpdate and time <= self.lastUpdate + interval then
 		return
 	end
 	local pkts, bytes = self:getThroughput()
 	updateCounter(self, time, pkts, bytes)
 end
 
-function manualTxCounter:updateWithSize(pkts, size)
+function manualTxCounter:updateWithSize(pkts, size, interval)
 	self.current = self.current + pkts
 	self.currentBytes = self.currentBytes + pkts * (size + 4)
+	interval = interval or 1
 	local time = dpdk.getTime()
-	if self.lastUpdate and time <= self.lastUpdate + 1 then
+	if self.lastUpdate and time <= self.lastUpdate + interval then
 		return
 	end
 	local pkts, bytes = self:getThroughput()
