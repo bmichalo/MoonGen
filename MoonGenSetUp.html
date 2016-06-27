@@ -25,9 +25,9 @@
         </ul>
         <br>
 
-        <b><li>Download the MoonGen source code (note my github cloned from the original)</li></b>
+        <b><li>Download the MoonGen source code</li></b>
         <pre>
-        [root@LinuxServer MoonGen]# git clone https://github.com/bmichalo/MoonGen
+        [root@LinuxServer MoonGen]# git clone https://github.com/atheurer/MoonGen
         </pre>
 
         <b><li>List the remote branches</li></b>
@@ -35,16 +35,22 @@
         [root@LinuxServer MoonGen]# cd MoonGen 
         [root@LinuxServer MoonGen]# git branch -a
         * master
-          dpdk2.x-opnfv
+          opnfv-stable
           remotes/origin/HEAD -> origin/master
           remotes/origin/dpdk2.x-opnfv
           remotes/origin/master
           remotes/origin/opnfv
           remotes/upstream/dpdk2.x-opnfv
           remotes/upstream/master
+          remotes/upstream/master-fixes
           remotes/upstream/opnfv
+          remotes/upstream/opnfv-stable
         </pre>
 
+        <b><li>Checkout the 'opnfv-stable branch' </li></b>
+        <pre>
+        [root@LinuxServer MoonGen]# git checkout opnfv-stable
+        </pre>
         <b><li>Initialize submodules</li></b>
         <pre>
         [root@LinuxServer MoonGen]# git submodule update --init 
