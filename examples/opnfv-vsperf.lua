@@ -878,9 +878,13 @@ function timerSlave(devs, dev1Id, dev2Id, runTime, testParams)
 	local haveHisto = false
 	local haveHisto1 = false
 	local haveHisto2 = false
+	local counter = 0
+	local counter1 = 0
+	local counter2 = 0
 	while (runTime == 0 or runTimer:running()) and dpdk.running() do
 		for count = 0, transactionsPerDirection - 1 do -- inner loop tests in one direction
 			rateLimit:wait()
+			counter = counter + 1
 			local lat = timestamper:measureLatency();
 			if (lat) then
 				haveHisto = true;
@@ -894,31 +898,44 @@ function timerSlave(devs, dev1Id, dev2Id, runTime, testParams)
 				hist = hist1
 				haveHisto2 = haveHisto
 				haveHisto = haveHisto1
+				counter2 = counter
+				counter = counter1
 			else
 				timestamper = timestamper2
 				hist = hist2
 				haveHisto1 = haveHisto
 				haveHisto = haveHisto2
+				counter1 = counter
+				counter = counter2
 			end
 		else
 			haveHisto1 = haveHisto
+			counter1 = counter
 		end
 	end
 	dpdk.sleepMillis(LATENCY_TRIM + 1000) -- the extra 1000 ms ensures the stats are output after the throughput stats
 	local histDesc = "Histogram port " .. testParams.ports[dev1Id] .. " to port " .. testParams.ports[testParams.connections[dev1Id]]
-	local histFile = "hist:" .. testParams.ports[deb1Id] .. "-" .. testParams.ports[testParams.connections[dev1Id]] .. ".csv"
+	local histFile = "hist:" .. testParams.ports[dev1Id] .. "-" .. testParams.ports[testParams.connections[dev1Id]] .. ".csv"
 	if haveHisto1 then
 		hist1:print(histDesc)
 		hist1:save(histFile)
+		local hist_size = hist1:totals()
+		if hist_size ~= counter1 then
+		   log:warn("[%s] Lost %d samples (%.2f%%)!", histDesc, counter1 - hist_size, (counter1 - hist_size)/counter1*100)
+		end
 	else
 		log:warn("no latency samples found for %s", histDesc)
 	end
 	if testParams.runBidirec then
-		local histDesc = "Histogram port " .. testParams.ports[testParams.connections[dev1Id]] .. " to port " .. testParams.ports[deb1Id]
+		local histDesc = "Histogram port " .. testParams.ports[testParams.connections[dev1Id]] .. " to port " .. testParams.ports[dev1Id]
 		local histFile = "hist:" .. testParams.ports[testParams.connections[dev1Id]] .. "-" .. testParams.ports[dev1Id] .. ".csv"
 		if haveHisto2 then
 			hist2:print(histDesc)
 			hist2:save(histFile)
+			local hist_size = hist2:totals()
+			if hist_size ~= counter2 then
+			   log:warn("[%s] Lost %d samples (%.2f%%)!", histDesc, counter2 - hist_size, (counter2 - hist_size)/counter2*100) 
+			end
 		else
 			log:warn("no latency samples found for %s", histDesc)
 		end
